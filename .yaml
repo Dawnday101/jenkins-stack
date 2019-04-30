@@ -1,0 +1,201 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: CloudFormation Jenkins Application Stack
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Jenkins Application Stack"
+        Parameters:
+          - Environment
+
+Parameters:
+  Environment:
+    Type: 'String'
+    Description: "Application stack Environment"
+    AllowedValues:
+      - dev
+      - test
+      - prod
+
+Mappings:
+  Global:
+    GlobalMap:
+      # February 2019 AMI
+      "AmiImage": "ami-00000000000000000"
+      "IamRole": "jenkins-role"
+      "VpnCidr": "10.000.0.0/00"
+  EnvironmentType:
+    dev:
+      "VPC": "vpc-00000000"
+      "KeyName": "dev-env-key"
+      "DisableApiTermination": "false"
+      "PrivateVpnSecGroup": "sg-00000000"
+      "CsrAccessSecGroup": "sg-00000000"
+      "EnterpriseAccessSecGroup": "sg-00000000"
+      "InstanceSize": "m4.large"
+      "InstanceAvailabilityZones": "us-east-1a"
+      "SubId": "subnet-0000000"
+      "HostName": "             "
+      # "PrivateIP": "             "
+      "PuppetMasterPrivateIP": "             "
+      "SecurityGroupName": "jenkins-dev-sg"
+      "EbsCidr": "10.000.0.0/00"
+      "HostedZoneName": ".cloud.local."
+
+
+    test:
+      "VPC": "vpc-"
+      "KeyName": "-test-env-key"
+      "DisableApiTermination": "false"
+      "PrivateVpnSecGroup": "sg-      "
+      "CsrAccessSecGroup": "sg-          "
+      "EnterpriseAccessSecGroup": "sg-         "
+      "HostName": "           "
+      "InstanceSize": "m4.large"
+      "InstanceAvailabilityZones": "us-east-1c"
+      "SubId": "subnet-       "
+      "PrivateIP": "10.000.000.0"
+      "PuppetMasterPrivateIP": "10.000.000.00"
+      "SecurityGroupName": "jenkins-test-sg"
+      "EbsCidr": "10.000.0.0/00"
+      "HostedZoneName": "         .cloud.local."
+
+    impl:
+      "VPC": "vpc-   "
+      "KeyName": "impl-env-key"
+      "DisableApiTermination": "false"
+      "PrivateVpnSecGroup": "sg-    "
+      "CsrAccessSecGroup": "sg-   "
+      "EnterpriseAccessSecGroup": "sg-"
+      "HostName": "         "
+      "InstanceSize": "m4.large"
+      "InstanceAvailabilityZones": "us-east-1b"
+      "SubId": "subnet-"
+      "PrivateIP": "             "
+      "PuppetMasterPrivateIP": "                "
+      "SecurityGroupName": "-jenkins-impl-sg"
+      "EbsCidr": "10.000.0.0/00"
+      "HostedZoneName": "          cloud.local."
+
+    prod:
+      "VPC": "vpc-"
+      "KeyName": "-prod-env-key"
+      "DisableApiTermination": "false"
+      "PrivateVpnSecGroup": "sg-          "
+      "CsrAccessSecGroup": "sg-         "
+      "EnterpriseAccessSecGroup": "sg-       "
+      "HostName": "                   "
+      "InstanceSize": "m4.xlarge"
+      "InstanceAvailabilityZones": "us-east-1c"
+      "SubId": "subnet-     "
+      "PrivateIP": "10         "
+      "PuppetMasterPrivateIP": "10.         "
+      "SecurityGroupName": "-jenkins-prod-sg"
+      "EbsCidr": "10.000.0.0/00"
+      "HostedZoneName": "midasdr-prod-mp.cmscloud.local."
+
+Resources:
+    InstanceSG:
+      Type: AWS::EC2::SecurityGroup
+      Properties:
+        #GroupName: !FindInMap [EnvironmentType, !Ref Environment, SecurityGroupName]
+        GroupDescription: Enable port 2049, 22, 80, 8080
+        VpcId: !FindInMap [EnvironmentType, !Ref Environment, VPC]
+        SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '8080'
+          ToPort: '8080'
+          CidrIp: 0.0.0.0/0
+          Description: "Enable access to Jenkins UI"
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: !FindInMap [Global, GlobalMap, VpnCidr]
+          Description: "Enable SSH to Jenkins"
+        - IpProtocol: tcp
+          FromPort: '2049'
+          ToPort: '2049'
+          CidrIp: !FindInMap [EnvironmentType, !Ref Environment, EbsCidr]
+          Description: "Enable (NFS) access to mount EFS volume"
+        Tags:
+        - Key: Name
+          Value: !FindInMap [EnvironmentType, !Ref Environment, SecurityGroupName]
+        - Key: CloudFormationStack
+          Value: !Ref 'AWS::StackId'
+    EC2Instance:
+      Type: 'AWS::EC2::Instance'
+      Properties:
+        BlockDeviceMappings:
+          -
+            DeviceName: "/dev/sda1"
+            Ebs:
+              VolumeSize: 100
+              VolumeType: gp2
+              DeleteOnTermination: "true" # Leave it as true when testnig
+        # PrivateIpAddress: !FindInMap [EnvironmentType, !Ref Environment, PrivateIP]
+        KeyName: !FindInMap [EnvironmentType, !Ref Environment, KeyName]
+        ImageId: !FindInMap [Global, GlobalMap, AmiImage]
+        InstanceType: !FindInMap [EnvironmentType, !Ref Environment, InstanceSize]
+        IamInstanceProfile: !FindInMap [Global, GlobalMap, IamRole]
+        SecurityGroupIds:
+          - !FindInMap [EnvironmentType, !Ref Environment, PrivateVpnSecGroup]
+          - !FindInMap [EnvironmentType, !Ref Environment, CsrAccessSecGroup]
+          - !FindInMap [EnvironmentType, !Ref Environment, EnterpriseAccessSecGroup]
+          - !Ref InstanceSG
+        AvailabilityZone: !FindInMap [EnvironmentType, !Ref Environment, InstanceAvailabilityZones]
+        SubnetId: !FindInMap [EnvironmentType, !Ref Environment,SubId ]
+        DisableApiTermination: !FindInMap [EnvironmentType, !Ref Environment, DisableApiTermination ]
+        InstanceInitiatedShutdownBehavior: stop
+        EbsOptimized: 'true'
+        Tags:
+          - Key: Name
+            Value: !FindInMap [EnvironmentType, !Ref Environment, HostName]
+          - Key: business
+            Value: CCOOOO
+          - Key: Project
+            Value: DevOps
+          - Key: application
+            Value: Jenkins
+          - Key: Environment
+            Value: !Ref Environment
+          - Key: availability_zone
+            Value: application
+          - Key: POC
+            Value: @google.com
+          - Key: role
+            Value: jenkins_master
+        Tenancy: dedicated
+        UserData:
+          Fn::Base64:
+            Fn::Sub:
+              - |
+                #!/bin/bash
+
+                /usr/local/bin/aws s3 cp s3://aws-"     "-infra-admin/scripts/userdata/userdata.sh /tmp/
+                /usr/bin/chmod 777 /tmp/userdata.sh
+                sed -i '2 i ENVIRONMENT=${Environment}' /tmp/userdata.sh
+                /tmp/userdata.sh
+                /usr/bin/rm /tmp/userdata.sh
+              - {
+                }
+    DnsRecord:
+      Type: AWS::Route53::RecordSet
+      Properties:
+        HostedZoneName: !FindInMap [EnvironmentType, !Ref Environment, HostedZoneName]
+        Name: !Join ['', [!FindInMap [EnvironmentType, !Ref Environment, HostName], ., !FindInMap [EnvironmentType, !Ref Environment, HostedZoneName]]]
+        Comment: "DNS name for Jenkins instance"
+        Type: A
+        TTL: '300'
+        ResourceRecords:
+        - !GetAtt EC2Instance.PrivateIp
+
+Outputs:
+  InstanceId:
+    Value: !Ref 'EC2Instance'
+    Description: Instance Id of newly created instance
+  PrivateIP:
+    Description: Private IP address of the newly created EC2 instance.
+    Value: !GetAtt EC2Instance.PrivateIp
+  PrivateDNS:
+    Description: Private DNS Name of the newly created EC2 instance.
+    Value: !GetAtt EC2Instance.PrivateDnsName
